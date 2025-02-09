@@ -1,0 +1,87 @@
+pipeline {
+    agent any
+    
+    environment {
+        ECR_REPO = 'aws_account_id.dkr.ecr.region.amazonaws.com/my-repo'
+        ECS_CLUSTER = 'my-cluster'
+        ECS_SERVICE = 'my-service'
+        AWS_REGION = 'us-east-1'
+        BRANCH_NAME = env.BRANCH_NAME
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Build Docker Image') {
+            when {
+                branch 'dev'
+            }
+            steps {
+                script {
+                    echo "Building Docker image for dev branch..."
+                    // Build Docker image
+                    sh 'docker build -t my-app:$BRANCH_NAME .'
+                }
+            }
+        }
+
+        stage('Push Docker Image to ECR') {
+            when {
+                branch 'dev'
+            }
+            steps {
+                script {
+                    echo "Pushing Docker image to AWS ECR..."
+                    // Log in to AWS ECR
+                    sh "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPO}"
+                    // Tag and push Docker image to ECR
+                    sh "docker tag my-app:$BRANCH_NAME ${ECR_REPO}:$BRANCH_NAME"
+                    sh "docker push ${ECR_REPO}:$BRANCH_NAME"
+                }
+            }
+        }
+
+        stage('Deploy to ECS (dev)') {
+            when {
+                branch 'dev'
+            }
+            steps {
+                script {
+                    echo "Deploying to ECS for dev branch..."
+                    // ECS deployment script for dev
+                    sh """
+                        ecs-cli configure --region ${AWS_REGION} --cluster ${ECS_CLUSTER}
+                        ecs-cli compose --file docker-compose.yml up
+                    """
+                }
+            }
+        }
+
+        stage('Deploy to ECS (prod)') {
+            when {
+                branch 'prod'
+            }
+            steps {
+                script {
+                    echo "Deploying to ECS for prod branch..."
+                    // Deploy to ECS for prod
+                    sh """
+                        ecs-cli configure --region ${AWS_REGION} --cluster ${ECS_CLUSTER}
+                        ecs-cli compose --file docker-compose.yml --ecs-params ecs-params-prod.yml up
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo "Cleaning up resources..."
+            // Clean up tasks after each build (e.g., remove temporary files).
+        }
+    }
+}
